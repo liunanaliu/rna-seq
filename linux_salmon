@@ -16,6 +16,45 @@ done
 
 multiqc ./
 
+mkdir tx2gene
+cd tx2gene
+
+vim gtf_geneid2symbol_gencode.sh 
+
+gtf='/Volumes/NANALIU026/ena_files/6align/Mus_musculus.GRCm38.102.gtf'
+#error for mapping with ensembl
+
+### gene_id to gene_name
+grep 'gene_id' $gtf | awk -F 'gene_id \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_id_tmp
+grep 'gene_id' $gtf | awk -F 'gene_name \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_name_tmp
+paste gene_id_tmp gene_name_tmp >last_tmp
+uniq last_tmp >g2s_GRCm38_ensembl.txt
+rm *_tmp
+
+### transcript_id to gene_name
+grep 'transcript_id' $gtf | awk -F 'transcript_id \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_id_tmp
+grep 'transcript_id' $gtf | awk -F 'gene_name \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_name_tmp
+paste gene_id_tmp gene_name_tmp >last_tmp
+uniq last_tmp >t2s_GRCm38_ensembl.txt
+rm *_tmp
+
+#try gncode
+wget ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M25/gencode.vM25.annotation.gtf.gz
+gtf='/Volumes/NANALIU026/ena_files/gencode.vM25.annotation.gtf'
+
+### gene_id to gene_name
+grep 'gene_id' $gtf | awk -F 'gene_id \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_id_tmp
+grep 'gene_id' $gtf | awk -F 'gene_name \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_name_tmp
+paste gene_id_tmp gene_name_tmp >last_tmp
+uniq last_tmp >g2s_vM25_gencode.txt
+rm *_tmp
+
+### transcript_id to gene_name
+grep 'transcript_id' $gtf | awk -F 'transcript_id \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_id_tmp
+grep 'transcript_id' $gtf | awk -F 'gene_name \"' '{print $2}' |awk -F '\"' '{print $1}' >gene_name_tmp
+paste gene_id_tmp gene_name_tmp >last_tmp
+uniq last_tmp >t2s_vM25_gencode.txt
+rm *_tmp
 
 #nanaliu1220
 #salmon_quant for covid
@@ -41,18 +80,7 @@ View(tx2gene)
 dim(tx2gene)
 #217701 3
 save(tx2gene,file = 'tx2gene.rda')
-
-library(tximport)
-txi=tximport(files,type = 'salmon',tx2gene = tx2gene)
-all(colnames(txi$counts)==colnames(txi$length))
-save(txi,file = 'txi.rda')
-salmon_expr=txi$counts
-dim(salmon_expr)
-#38701 * 24
-salmon_expr <- salmon_expr[rowSums(salmon_expr)>0, ]
-#21751 * 24
-save(salmon_expr,file = 'salmon_expr.rda')
-colnames(salmon_expr)
+cd 
 
 sampleTable=data.frame(condition=factor(rep(c('ABBV744','ACE2','BRD2','COMP','JQ1','nosgRNA','ProteinE_BRD2','WT_ProteinE'),
                                             c(3,3,3,3,3,3,3,3))))#each=3
