@@ -1,0 +1,215 @@
+#from fastq to expression matrix
+#20220726 on linux
+conda activate rna
+cd /Users/nanaliu/Desktop
+cd ena_files
+ls
+#step1 run fastqc
+cd 1fastq_qc
+##ln -s fastq/*.fastq.gz ./
+fastqc ../fastq/*.fastq.gz -o ./
+  ##lack ERR1981153, corrected
+multiqc ./*zip -o ./
+#ERR4777077 have the lowest reads
+  cd ..
+ls *fastq.gz | cut -d '.' -f 1 | uniq > samples
+cd ../2trim
+ls *fq.gz | cut -d '_' -f 1 |uniq > samples
+mkdir 2trim
+cd 2trim
+
+cat samples | while read id
+do
+trim_galore --length 36 --cores 16 -o ./ ../fastq/${id}.fastq.gz 
+done
+
+mkdir 3re_qc
+cd 3re_qc
+fastqc ../2trim/*.fq.gz -o ./
+##lack ERR1981153, corrected
+multiqc ./*zip -o ./
+#ERR4777077 have the lowest reads
+cd ..
+#https://www.gencodegenes.org/mouse/
+#http://refgenomes.databio.org/v3/genomes/splash/0f10d83b1050c08dd53189986f60970b92a315aa7a16a6f1
+#http://refgenomes.databio.org/v3/genomes/splash/0f10d83b1050c08dd53189986f60970b92a315aa7a16a6f1
+
+#http://daehwankimlab.github.io/hisat2/download/#m-musculus
+#https://github.com/kpatel427/YouTubeTutorials/blob/main/RNASeqpipeline.sh
+hisat2 -p 4 -q --rna-strandness R -x hisat2_mm10/genome -U ../2trim/ERR1981150_trimmed.fq.gz |\
+samtools sort -o ERR1981150_trimmed.hisat.bam
+cat samples | while read id
+do
+hisat2 -p 4 -q --rna-strandness R -x hisat2_mm10/genome -U ../2trim/${id}_trimmed.fq.gz |\
+samtools sort -o ${id}
+done
+
+mkdir 5mapping
+cd 5mapping
+#tar -zxvf 
+wget https://github.com/alexdobin/STAR/archive/2.7.1a.tar.gz
+tar -xzf 2.7.1a.tar.gz
+cd STAR-2.7.1a
+make STAR
+
+conda install -c bioconda star-fusion 
+#https://github.com/STAR-Fusion/STAR-Fusion/issues/147
+conda install -c bioconda star=2.7.1a
+
+#http://refgenie.databio.org/en/latest/available_assets/
+#https://www.biostars.org/p/221781/ how to use star to build index
+#simplized 
+
+
+STAR --runThreadN NumberOfThreads \
+--runMode genomeGenerate \
+--genomeDir /path/to/genomeDir \
+--genomeFastaFiles /path/to/genome/fasta1 /path/to/genome/fasta2 ... \
+--sjdbGTFfile /path/to/annotations.gtf \
+--sjdbOverhang ReadLength-1
+
+
+cat samples | while read id
+do
+STAR --runThreadN 5 \
+--genomeDir ../default --sjdbGTFfile \
+--outSAMtype BAM SortedByCoordinate --outReadsUnmapped Fastx \
+--quantMode GeneCounts TranscriptomeSAM  \
+--readFilesIn ../2trim/${id}_trimmed.fq.gz  --outFileNamePrefix ${id}_star 
+done 
+#Transcriptome.cpp:14:Transcriptome: exiting because of *INPUT FILE* error: 
+#could not open input file ../default/geneInfo.tab
+#Solution: check that the file exists and you have read permission for this file
+#SOLUTION: utilize --sjdbGTFfile /path/to/annotations.gtf option at the genome generation step or mapping step
+cat samples | while read id
+do
+STAR --runThreadN 5 \
+--genomeDir ../star_mm10_index \
+--outSAMtype BAM SortedByCoordinate --outReadsUnmapped Fastx \
+--quantMode GeneCounts TranscriptomeSAM --readFilesCommand zcat \
+--outFilterType BySJout --outFilterMultimapNmax 20 \
+--outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 \
+--alignSJoverhangMin 8 --alignSJDBoverhangMin 1 \
+--chimSegmentMin 20 --chimJunctionOverhangMin 20 --chimOutJunctionFormat 1 \
+--alignIntronMin 20 --alignIntronMax 1000000 --alignMatesGapMax 1000000 \
+--chimSegmentReadGapMax 0 --alignSJstitchMismatchNmax 0 -1 0 0 \
+--readFilesIn ../2trim/${id}_trimmed.fq.gz  --outFileNamePrefix ${id}
+done 
+
+#https://www.jianshu.com/p/9749d9ca8df8?u_atoken=35b6fe81-a6de-4f1c-8042-069850f76092&u_asession=01lASGVfcsPoJYGngZpmVxb8ZkODOqvMUY7wxSuiaHBEKFfm5Zc1eLd86V0zar6NRcX0KNBwm7Lovlpxjd_P_q4JsKWYrT3W_NKPr8w6oU7K8IpdzX0RvY-2EQV0uXUTIknHmbkqVcEgdObpAroqY1_GBkFo3NEHBv0PZUm6pbxQU&u_asig=05psoSHU7Wv6_f8KE1VSR9R10JOLWap7Z6EKYq4mYs4UrenlAxbrZsjuq7E-483CffAfzAqZIGai1jzs3kuZCEZAuoOsKWSyo2PZv-DftW9u08WfRNf2xjI-8nzzxcTCkFFlhDsB7ixHmaAQvWtdeBMBxPgJ8QCC31OAFqEAxL8Fr9JS7q8ZD7Xtz2Ly-b0kmuyAKRFSVJkkdwVUnyHAIJzaKapfD4kVB86Xd_bxjkCQUStBLRgVn7n6caRl-bwmte6xbSxAaWh9ph0bRUFW-6vO3h9VXwMyh6PgyDIVSG1W_yMbvmsHnO-0dFGNp38pqIy0qTsxR7qEWTA1lqp7eisF_GTIdHFaViOB_s3fkN5WWWfwu8HW1Gw2GZo_EhyCOnmWspDxyAEEo4kbsryBKb9Q&u_aref=5XP06crUYqekb4PKoJN4MF2kAAw%3D
+
+#https://www.jianshu.com/p/6d385b729b27?u_atoken=b39997c9-0413-4d2b-b7c9-a9c5c6211d4c&u_asession=01z3pY0SaNdzfFOWv135Wbl938vN8oDTijl6oFe3T2balLIDTYReMd0FZN0ILkjNNUX0KNBwm7Lovlpxjd_P_q4JsKWYrT3W_NKPr8w6oU7K8tssven5j_bYSFYSJ7mCn7nHmbkqVcEgdObpAroqY1_GBkFo3NEHBv0PZUm6pbxQU&u_asig=05WsD83ID0Tr7mSzPvQnLSMDywEG_eGb1-WEihzKdQdMROH7u87FTnU8jytJBe8PXykCMEyoZlmzLEWSbIntvud2CI02yoYSsNLb5vn_ZkhFIgZeMJKEED4pspXHDlU-DpwdcUtT-47k2PmrfFrwnCMa2cgRE3ViRLrOk0p_Z1_OX9JS7q8ZD7Xtz2Ly-b0kmuyAKRFSVJkkdwVUnyHAIJzSC0PjTjZwkb6HIymuK_ywBF5MWru235JhLHZNlA6Fee6xbSxAaWh9ph0bRUFW-6vO3h9VXwMyh6PgyDIVSG1W-eBw1a4On4Kg-d1voQvd9uE1KTOKjP6AkuhZoolFIX0XDk_2KF-0g8nC0U3SkpdOWaAHVl62SuCamf1ZWIH0bymWspDxyAEEo4kbsryBKb9Q&u_aref=U7%2BkcBh56zbi1%2FtkKBF12sugM3k%3D
+
+# wget http://ftp.ensembl.org/pub/release-106/gtf/homo_sapiens/Homo_sapiens.GRCh38.106.gtf.gz
+# https://hgdownload.soe.ucsc.edu/downloads.html#mouse
+#while mm10 corresponding to GRCm38, mm39 is the latest version, with GCm39
+mkdir 6align
+cd 6align
+cat samples | while read id
+do
+featureCounts -S 2 -g -t -a Mus_musculus.GRCm38.102.gtf  \
+-o ${id}_featurecounts.txt ../5mapping/${id}_trimmed.hisat.bam
+done
+#ratio is about 50% 
+#maybe could try again with -g -t
+#now combine all the count files
+cat samples | while read id
+do
+featureCounts -S 2 -a Mus_musculus.GRCm38.102.gtf  \
+-o featurecounts.txt ../5mapping/${id}_trimmed.hisat.bam
+done
+#-g -t do not work for me
+multiqc ./
+
+mkdir 
+cat samples | while read id
+do
+
+#
+rm(list=ls())
+options(stringsAsFactors = F) 
+library(tidyverse) # ggplot2 stringer dplyr tidyr readr purrr  tibble forcats
+library(data.table) 
+
+#### 对counts进行处理筛选得到表达矩阵 ####
+a1 <- fread('./counts/counts.txt',
+            header = T,data.table = F)#载入counts，第一列设置为列名
+colnames(a1)
+counts <- a1[,7:ncol(a1)] #截取样本基因表达量的counts部分作为counts 
+
+
+###环境设置
+rm(list=ls())
+options(stringsAsFactors = F) 
+library(tidyverse) # ggplot2 stringer dplyr tidyr readr purrr  tibble forcats
+library(data.table) #多核读取文件
+setwd("C:/Users/Lenovo/Desktop/test")
+
+#### 对counts进行处理筛选得到表达矩阵 ####
+a1 <- fread('./counts/counts.txt',
+            header = T,data.table = F)#载入counts，第一列设置为列名
+colnames(a1)
+counts <- a1[,7:ncol(a1)] #截取样本基因表达量的counts部分作为counts 
+rownames(counts) <- a1$Geneid #将基因名作为行名
+#更改样品名
+colnames(counts)
+colnames(counts) <- gsub('/home/test/align/bam/','', #删除样品名前缀
+                         gsub('_sorted.bam','',  colnames(counts))) #删除样品名后缀
+
+
+#### 导入或构建样本信息,  进行列样品名的重命名和分组####
+b <- read.csv('./SraRunTable.txt')
+b
+name_list <- b$source_name[match(colnames(counts),b$Run)]; name_list  #选择所需要的样品信息列
+nlgl <- data.frame(row.names=colnames(counts),
+                   name_list=name_list,
+                   group_list=name_list)
+fix(nlgl)  #手动编辑构建样品名和分组信息
+name_list <- nlgl$name_list
+colnames(counts) <- name_list #更改样品名
+group_list <- nlgl$group_list
+gl <- data.frame(row.names=colnames(counts), #构建样品名与分组对应的数据框
+                 group_list=group_list)
+
+
+
+#### counts，TPM转化 ####
+# 注意需要转化的是未经筛选的counts原始矩阵
+### 从featurecounts 原始输出文件counts.txt中提取Geneid、Length(转录本长度)，计算tpm
+geneid_efflen <- subset(a1,select = c("Geneid","Length"))
+colnames(geneid_efflen) <- c("geneid","efflen")  
+
+### 取出counts中geneid对应的efflen
+efflen <- geneid_efflen[match(rownames(counts),
+                              geneid_efflen$geneid),
+                        "efflen"]
+
+### 计算 TPM 公式
+#TPM (Transcripts Per Kilobase Million)  每千个碱基的转录每百万映射读取的Transcripts
+counts2TPM <- function(count=count, efflength=efflen){
+  RPK <- count/(efflength/1000)   #每千碱基reads (Reads Per Kilobase) 长度标准化
+  PMSC_rpk <- sum(RPK)/1e6        #RPK的每百万缩放因子 (“per million” scaling factor ) 深度标准化
+  RPK/PMSC_rpk              
+} 
+
+tpm <- as.data.frame(apply(counts,2,counts2TPM))
+colSums(tpm)
+
+#### 初步过滤低表达基因 ####（筛选标准不唯一、依情况而定）
+#筛选出至少在重复样本数量内的表达量counts大于1的行（基因）
+keep_feature <- rowSums(counts>1) >= 2
+table(keep_feature)  #查看筛选情况，FALSE为低表达基因数（行数），TURE为要保留基因数
+#FALSE  TRUE 
+#35153 20339 
+
+counts_filt <- counts[keep_feature, ] #替换counts为筛选后的基因矩阵（保留较高表达量的基因）
+tpm_filt <- tpm[keep_feature, ]
+
+#### 保存数据 ####
+counts_raw=counts #这里重新命名方便后续分析调用
+counts=counts_filt
+tpm=tpm_filt
+
+save(counts_raw, counts, tpm, 
+     group_list, gl,
+     file='./1.counts.Rdata')
