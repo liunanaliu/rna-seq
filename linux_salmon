@@ -1,1 +1,63 @@
+#http://ftp.ensembl.org/pub/release-102/fasta/mus_musculus/cdna/
+mkdir 4salmon
+cd 4salmon
+salmon index -p 12 -t  Mus_musculus.GRCm38.cdna.all.fa  -i  salmon_index
 
+
+mkdir 5quant
+cd 5quant
+
+cat samples | while read id
+do
+salmon quant -i ./salmon_index -l A \
+../2trim/${id}_trimmed.fq.gz |\
+-p 12 --output ${id}_quant
+done
+
+multiqc ./
+
+
+#nanaliu1220
+#salmon_quant for covid
+rm(list = ls())
+options(stringsAsFactors = F)
+setwd('/Volumes/NANALIU026/COVID_RNA_seq')
+dir=file.path(getwd())
+dir
+files <- list.files(pattern = '*sf',dir,recursive = T)
+files <- file.path(dir,files)
+all(file.exists(files))
+
+library(readr)
+Run=sapply(strsplit(files,'\\/'),function(x)x[6])
+Run=gsub('_R1_001_quant','',Run)
+names(files)=Run
+save(files,file='files.rda')
+
+tx2gene=read.delim('/Volumes/NANALIU026/1116_reference/gencode.v36.metadata.HGNC',header = F)
+tx2gene=tx2gene[,-3]
+names(tx2gene)=c('tx_id','gene_id')
+View(tx2gene)
+dim(tx2gene)
+#217701 3
+save(tx2gene,file = 'tx2gene.rda')
+
+library(tximport)
+txi=tximport(files,type = 'salmon',tx2gene = tx2gene)
+all(colnames(txi$counts)==colnames(txi$length))
+save(txi,file = 'txi.rda')
+salmon_expr=txi$counts
+dim(salmon_expr)
+#38701 * 24
+salmon_expr <- salmon_expr[rowSums(salmon_expr)>0, ]
+#21751 * 24
+save(salmon_expr,file = 'salmon_expr.rda')
+colnames(salmon_expr)
+
+sampleTable=data.frame(condition=factor(rep(c('ABBV744','ACE2','BRD2','COMP','JQ1','nosgRNA','ProteinE_BRD2','WT_ProteinE'),
+                                            c(3,3,3,3,3,3,3,3))))#each=3
+condition=sampleTable$condition
+sampleTable$condition=relevel(factor(condition),'nosgRNA')
+condition=sampleTable$condition
+rownames(sampleTable)=colnames(salmon_expr)
+save(sampleTable,file = 'sampleTable.rda')
