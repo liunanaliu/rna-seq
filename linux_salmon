@@ -9,8 +9,8 @@ cd 5quant
 
 cat samples | while read id
 do
-salmon quant -i ./salmon_index -l A \
-../2trim/${id}_trimmed.fq.gz |\
+salmon quant -l A -i ../salmon_index \
+-r /Volumes/NANALIU026/ena_files/2trim/${id}_trimmed.fq.gz \
 -p 12 --output ${id}_quant
 done
 
