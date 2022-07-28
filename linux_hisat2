@@ -4,15 +4,19 @@ conda activate rna
 cd /Users/nanaliu/Desktop
 cd ena_files
 ls
+
 #step1 run fastqc
 cd 1fastq_qc
 ##ln -s fastq/*.fastq.gz ./
 fastqc ../fastq/*.fastq.gz -o ./
   ##lack ERR1981153, corrected
 multiqc ./*zip -o ./
-#ERR4777077 have the lowest reads
-  cd ..
+#ERR4777077 have the lowest reads, no errors for the file
+
+cd ..
 ls *fastq.gz | cut -d '.' -f 1 | uniq > samples
+
+#step2 run trimmomatic to trim reads with poor quality
 cd ../2trim
 ls *fq.gz | cut -d '_' -f 1 |uniq > samples
 mkdir 2trim
@@ -23,6 +27,7 @@ do
 trim_galore --length 36 --cores 16 -o ./ ../fastq/${id}.fastq.gz 
 done
 
+#step3 re-qc
 mkdir 3re_qc
 cd 3re_qc
 fastqc ../2trim/*.fq.gz -o ./
@@ -32,18 +37,23 @@ multiqc ./*zip -o ./
 cd ..
 #https://www.gencodegenes.org/mouse/
 #http://refgenomes.databio.org/v3/genomes/splash/0f10d83b1050c08dd53189986f60970b92a315aa7a16a6f1
-#http://refgenomes.databio.org/v3/genomes/splash/0f10d83b1050c08dd53189986f60970b92a315aa7a16a6f1
+
 
 #http://daehwankimlab.github.io/hisat2/download/#m-musculus
 #https://github.com/kpatel427/YouTubeTutorials/blob/main/RNASeqpipeline.sh
+
+#one sample test for hisat2
 hisat2 -p 4 -q --rna-strandness R -x hisat2_mm10/genome -U ../2trim/ERR1981150_trimmed.fq.gz |\
 samtools sort -o ERR1981150_trimmed.hisat.bam
+
+#batch analysis for all samples with hisat2
 cat samples | while read id
 do
 hisat2 -p 4 -q --rna-strandness R -x hisat2_mm10/genome -U ../2trim/${id}_trimmed.fq.gz |\
 samtools sort -o ${id}
 done
 
+#step 5 mapping / alignment 
 mkdir 5mapping
 cd 5mapping
 #tar -zxvf 
