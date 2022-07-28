@@ -1,1 +1,5 @@
+#get star_index from [refgenomes](http://refgenomes.databio.org/v3/genomes/splash/0f10d83b1050c08dd53189986f60970b92a315aa7a16a6f1)
+while lack some tab files, like geneinfo.tab.
+I could not figure out how to handle the pre-built star_index
+building index via own laptop is time- abd space consuming
 
