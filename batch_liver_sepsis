@@ -1,1 +1,202 @@
+#
+library(sva)
+
+load("/Volumes/NANALIU026/ena_files/4salmon/5quant/rawcount4_0728.rda")
+#with CLP 6h, 12h and 24h
+
+load("/Users/nanaliu/Desktop/gse17954/exprset_lcxc2220724.rda")
+#with sham, CLP 6 and 12 h
+
+exprset_lcxc2$batch <- 1
+rawcount4$batch <- 2
+
+exprset_lcxc2[,c(1:3)] <- NULL
+names(exprset_lcxc2)[1] <- 'Time'
+exprset_lcxc2$Organ <- 'liver'
+
+rawcount4$Time <- str_replace(rawcount4$Time,'h','H')
+rawcount4$Time <- str_c('CLP',rawcount4$Time,sep = '_')
+rawcount4$Cxcr1 <- NULL
+
+sepsis_l <- rbind(exprset_lcxc2,rawcount4)
+
+BiocManager::install('bladderbatch')
+library(bladderbatch)
+data(bladderdata)
+edata <- exprs(bladderEset)
+dist_mat <- dist(sepsis_l[,-c(1,6,7)])
+clustering <- hclust(dist_mat,method = 'complete')
+plot(clustering,labels=sepsis_l$batch)
+plot(clustering,labels=sepsis_l$Time)
+
+#use rawdata with all genes
+load("/Users/nanaliu/Desktop/gse17954/exprset220724.rda")
+exprset_l <- exprset[exprset$source_name_ch1=='liver',]
+table(exprset_l$`drugs:ch1`)
+exprset_l <- subset(exprset_l, `drugs:ch1` == 'vehicle' |
+                     `drugs:ch1` == 'no treatment')
+exprset_l$title=exprset_l$`drugs:ch1` <- NULL
+names(exprset_l)[1] <- 'Organ'
+names(exprset_l)[2] <- 'Time'
+exprset_l$Time <- str_replace(exprset_l$Time,
+                              'h','H')
+#also change the sham group, to sHam
+exprset_l$Batch <- 1
+save(exprset_l,file = 'exprset_l_b1.rda')
+length(colnames(exprset_l))
+dim(exprset_l)
+#12* 14873
+
+
+load("/Volumes/NANALIU026/ena_files/4salmon/5quant/rawcount2_0728.rda")
+dim(rawcount2)
+#18* 21656
+rawcount2$run_accession <- 2
+names(rawcount2)[1] <- 'Batch'
+rawcount2$Time <- str_c('CLP',rawcount2$Time,sep = '_')
+save(rawcount2,file = 'racount2l_b2.rda')
+universe <- intersect(colnames(exprset_l),colnames(rawcount2))
+length(universe)
+#13495
+#pay attention to the difference of rownames and colnames for intersect
+#if for rownames, add , to subset 
+exprset_l2 <- exprset_l[universe]
+dim(exprset_l2)
+#12 * 13495 
+#for shared genes with raw counts
+exprset_l2$Time <- str_replace(exprset_l2$Time,
+                              '-','_')
+exprset_l2$Time <- str_replace(exprset_l2$Time,
+                               'sH','Sh')
+head(exprset_l2[,c(1,2,13495)])
+#also change the length of columns after intersect
+which(colnames(exprset_l2)=='Batch')
+#13495
+sum(exprset_l2=0)
+sum(is.na(exprset_l2))
+#test
+s <- exprset_l2[,-c(1,2,13495)]
+log2(edgeR::cpm(s)+1)
+#Error in cpm.default(s) : 
+#library sizes should be finite and non-negative
+dim(s)
+
+exprset_l3 <- log2(edgeR::cpm(exprset_l2[,-c(1,2,13495)])+1)
+#i do not know the reason of failure for the code
+
+rawcount3 <- rawcount2[universe]
+dim(rawcount2)
+#18 * 21656
+dim(rawcount3)
+#18 * 13495
+head(rawcount3[,c(1,2,13495)])
+which(colnames(rawcount3)=='Batch')
+#13495
+rawcount3 <- log2(edgeR::cpm(rawcount3[,-c(1,2,13495)])+1)
+rawcount3 <- cbind(rawcount2[,1:3],rawcount3)
+save(rawcount3,file = 'rawcount3nor_b2.rda')
+
+#clusterr for batch 2
+dist_mat_b2 <- dist(rawcount3[,-c(1:3)])
+clustering_b2 <- hclust(dist_mat_b2,method = 'complete')
+plot(clustering_b2,labels=rawcount3$Batch)
+plot(clustering_b2,labels=rawcount3$Time)
+#not obvious divided clusters based on condtions
+
+rawcount2_cxc <- rawcount2[,c("Batch","Organ","Time",
+                              'Gapdh','Cxcl1',
+                              'Cxcl2','Cxcr2')]
+View(rawcount2_cxc)
+rawcount2_cxc2 <- log2(edgeR::cpm(rawcount2_cxc[,-c(1:3)])+1)
+View(rawcount2_cxc2)
+rawcount2_cxc2 <- cbind(rawcount2_cxc[,1:3],rawcount2_cxc2)
+
+exprset_l2cxc <- exprset_l2[,c("Batch","Organ","Time",
+                               'Gapdh','Cxcl1',
+                               'Cxcl2','Cxcr2')]
+View(exprset_l2cxc)
+exprset_l2cxc2 <- log2(edgeR::cpm(exprset_l2cxc[,-c(1:3)])+1)
+View(exprset_l2cxc2)
+exprset_l2cxc2 <- cbind(exprset_l2cxc[,1:3],exprset_l2cxc2)
+
+#so strange they have one o in each batch of counts in the column of cxcl2
+sepsis_lcxc <- rbind(exprset_l2cxc2,rawcount2_cxc2)
+View(sepsis_lcxc)
+fix(sepsis_lcxc)#0s to 8 & 14
+save(sepsis_lcxc,file = 'sepsis_lcxc_2batch.rda')
+sepsis_lcxc$Time <- factor(sepsis_lcxc$Time,
+                           levels = c("Sham_operated",
+                                      "CLP_6H","CLP_12H",
+                                      "CLP_24H"))
+method1 <- "anova" # one of "anova" or "kruskal.test"
+method2 <- "t.test" # one of "wilcox.test" or "t.test"
+my_comparisons <- list(c("Sham_operated","CLP_6H"), 
+                       c("Sham_operated","CLP_12H"), 
+                       c("Sham_operated","CLP_24H"),
+                       c("CLP_6H","CLP_12H"),
+                       c("CLP_6H","CLP_24H"),
+                       c("CLP_12H","CLP_24H")) 
+# comparisons for post-hoc tests
+
+x <- which(names(sepsis_lcxc) == "Time") # name of grouping variable
+y <- which(names(sepsis_lcxc) == "Gapdh" # names of variables to test
+           | names(sepsis_lcxc) == "Cxcr1" |
+             names(sepsis_lcxc) == "Cxcr2" |
+             names(sepsis_lcxc) == "Cxcl1" |
+             names(sepsis_lcxc) == "Cxcl2")
+# Edit at your own risk
+library(ggplot2)
+library(ggpubr)
+for (i in y) {
+  for (j in x) {
+    p <- ggboxplot(sepsis_lcxc,
+                   x = colnames(sepsis_lcxc[j]), 
+                   y = colnames(sepsis_lcxc[i]),
+                   color = colnames(sepsis_lcxc[j]),
+                   xlab = 'Time (H)',
+                   title = 'Liver expression',
+                   legend = "none",
+                   palette = "npg",
+                   add = "point"
+    )
+    print(
+      p + stat_compare_means(aes(label = paste0(..method.., 
+                                                ", p-value = ",
+                                                ..p.format..)),
+                             method = method1, 
+                             label.y = max(sepsis_lcxc[, i], 
+                                           na.rm = TRUE)
+      )
+      + stat_compare_means(comparisons = my_comparisons, 
+                           method = method2, 
+                           label = "p.format") # remove if p-value of ANOVA or Kruskal-Wallis test >= alpha
+    )
+  }
+}
+
+sepsis_lcxc_wide <- gather(sepsis_lcxc[,-c(1:2)],
+                         'gene','expression' ,-"Time")
+View(sepsis_lcxc_wide)
+sepsis_lcxc_wide$gene <- factor(sepsis_lcxc_wide$gene,
+                              levels = c("Gapdh","Cxcl1",
+                                         "Cxcl2","Cxcr2"))
+
+save(sepsis_lcxc_wide,file = 'sepsis_lcxc_wide_220728.rda')
+
+library(ggpubr)
+p <- ggboxplot(sepsis_lcxc_wide,
+               "Time", 
+               'expression',
+               color = 'gene',
+               #legend = "none",
+               palette = "npg",
+               ylab = 'Liver expression',
+               xlab = 'Time (H)',
+               add = "point"
+)
+
+p
+
+
+
 
