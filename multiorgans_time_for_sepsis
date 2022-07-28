@@ -1,0 +1,157 @@
+#specialized for liver during distinct time, including 6h, 12h and 24h, without starting time, 
+rm(list = ls())
+options(stringsAsFactors = F)
+setwd("/Volumes/NANALIU026/ena_files/4salmon/5quant")
+dir=file.path(getwd())
+dir
+files <- list.files(pattern = '*sf',dir,recursive = T)
+files <- file.path(dir,files)
+all(file.exists(files))
+
+library(readr)
+Run=sapply(strsplit(files,'\\/'),function(x)x[7])
+Run=gsub('_quant','',Run)
+names(files)=Run
+save(files,file='files.rda')
+
+library(tximport)
+library(tidyverse) 
+library(data.table)
+t2s <- fread("t2s_vM25_gencode.txt", data.table = F, header = F); head(t2s)
+
+names(t2s)=c('tx_id','gene_id')
+View(t2s)
+dim(t2s)
+#14604 2
+save(t2s,file = 't2s_salmon.rda')
+
+
+txi=tximport(files,type = 'salmon',tx2gene = t2s)
+#did not work with ensembl
+#https://zhuanlan.zhihu.com/p/513309653
+
+all(colnames(txi$counts)==colnames(txi$length))
+save(txi,file = 'txi.rda')
+salmon_expr=txi$counts
+salmon_tpm <- txi$abundance
+colnames(salmon_expr)==colnames(salmon_tpm)
+#True
+
+dim(salmon_expr)
+#35625 * 18
+salmon_expr <- salmon_expr[rowSums(salmon_expr)>0, ]
+#21653 * 24
+save(salmon_expr,file = 'salmon_expr.rda')
+colnames(salmon_expr)
+
+library(tidyverse)
+library(dplyr)
+PRJEB20791_metadata <- read_excel("PRJEB20791_metadata.xlsx")
+names(PRJEB20791_metadata)
+metadata <- PRJEB20791_metadata[,c(1,5)]
+#gsub('ftp.sra.ebi.ac.uk/vol1/run/ERR198/','',metadata$submitted_ftp)
+#substring(metadata$submitted_ftp,46,54)
+#str_split(metadata$submitted_ftp,'_',simplify = T)[,1]
+metadata$condition <- str_split(metadata$submitted_ftp,
+                                '\\/',simplify = T)[,6]
+metadata$Organ <- str_split(metadata$condition,'_',simplify = T)[,2]
+metadata$Time <- str_split(metadata$condition,'_',simplify = T)[,1]
+metadata$submitted_ftp=metadata$organ=NULL
+metadata$condition=NULL
+
+colnames(metadata)
+rownames(metadata) <- metadata$run_accession
+
+rawcount <- data.frame(t(salmon_expr))
+rawcount$Cxcl1
+rawcount$Cxcl2
+rawcount$Cxcr1
+rawcount$Cxcr2
+rawcount2$Gapdh
+keep <- rownames(rawcount)
+metadata2 <- metadata[keep,]
+rawcount2 <- cbind(metadata2,rawcount)
+#104 * 14874 (14870+4)
+save(rawcount2,file = 'rawcount2_0728.rda')
+
+names(rawcount2)[1:6]
+rawcount3 <- rawcount2[,c('Organ','Time','Gapdh','Cxcl1',
+                          'Cxcl2','Cxcr1','Cxcr2')]
+
+rawcount4 <- log2(edgeR::cpm(rawcount3[,-(1:2)])+1)
+rawcount4 <- cbind(rawcount3[,1:2],rawcount4)
+
+View(rawcount4)
+
+rawcount4$Time <- factor(rawcount4$Time,
+                         levels = c("6H","12H","24H"))
+
+method1 <- "anova" # one of "anova" or "kruskal.test"
+method2 <- "t.test" # one of "wilcox.test" or "t.test"
+my_comparisons <- list(c("6H","12H"), 
+                       c("6H","24H"), 
+                       c("12H","24H")) 
+# comparisons for post-hoc tests
+
+x <- which(names(rawcount4) == "Time") # name of grouping variable
+y <- which(names(rawcount4) == "Gapdh" # names of variables to test
+           | names(rawcount4) == "Cxcr1" |
+             names(rawcount4) == "Cxcr2" |
+             names(rawcount4) == "Cxcl1" |
+             names(rawcount4) == "Cxcl2")
+# Edit at your own risk
+library(ggplot2)
+library(ggpubr)
+for (i in y) {
+  for (j in x) {
+    p <- ggboxplot(rawcount4,
+                   x = colnames(rawcount4[j]), 
+                   y = colnames(rawcount4[i]),
+                   color = colnames(rawcount4[j]),
+                   legend = "none",
+                   palette = "npg",
+                   add = "point"
+    )
+    print(
+      p + stat_compare_means(aes(label = paste0(..method.., 
+                                                ", p-value = ",
+                                                ..p.format..)),
+                             method = method1, 
+                             label.y = max(rawcount4[, i], 
+                                           na.rm = TRUE)
+      )
+      + stat_compare_means(comparisons = my_comparisons, 
+                           method = method2, 
+                           label = "p.format") # remove if p-value of ANOVA or Kruskal-Wallis test >= alpha
+    )
+  }
+}
+
+
+
+
+
+
+
+
+rawcount4_wide <- gather(rawcount4[,-1],
+                        'gene','expression' ,-"Time")
+rawcount4_wide$gene <- factor(rawcount4_wide$gene,
+                             levels = c("Gapdh","Cxcr1","Cxcr2",
+                                        "Cxcl1","Cxcl2"))
+
+save(rawcount4_wide,file = 'rawcount4_wide_220728.rda')
+
+library(ggpubr)
+p <- ggboxplot(rawcount4_wide,
+               "Time", 
+               'expression',
+               color = 'gene',
+               #legend = "none",
+               palette = "npg",
+               ylab = 'Liver expression',
+               xlab = 'Time of sepsis',
+               add = "point"
+)
+
+p
