@@ -165,16 +165,180 @@ pbmc <- Seurat::CreateSeuratObject(counts = as.matrix(assay(pbmc, "counts")),
 #ASURAT transforms centered read count tables to functional feature matrices, 
 #termed sign-by-sample matrices (SSMs). Using SSMs, perform unsupervised clustering of samples (cells).
 
-mat <- t(as.matrix(assay(pbmc, "centered")))
-cormat <- cor(mat, method = "spearman")
+#https://satijalab.org/seurat/articles/sctransform_vignette.html
+# store mitochondrial percentage in object meta data
+pbmc <- PercentageFeatureSet(pbmc,
+                             pattern = "^MT-", 
+                             col.name = "percent.mt")
+# run sctransform
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(glmGamPoi)
+# run sctransform
+pbmc <- SCTransform(pbmc, method = "glmGamPoi",
+                    vars.to.regress = "percent.mt", 
+                    verbose = FALSE)
 
+# These are now standard steps in the Seurat workflow for visualization and clustering
+pbmc <- RunPCA(pbmc, verbose = FALSE)
+#Compute the cumulative sum of variances, which is used for determining the number of the principal components (PCs).
+pc <- which(cumsum(pbmc@reductions[["pca"]]@stdev) /
+              sum(pbmc@reductions[["pca"]]@stdev) > 0.3)[1]
+# Run t-SNE.
+pbmc <- RunUMAP(pbmc, dims = seq_len(pc), verbose = FALSE)
+# Create k-nearest neighbor graph.
+pbmc <- FindNeighbors(pbmc, dims = seq_len(pc), verbose = FALSE)
+# Cluster cells.
+pbmc <- FindClusters(pbmc, resolution = 0.1,
+                     verbose = FALSE)
+DimPlot(pbmc, label = TRUE) + NoLegend()
+
+head(pbmc@meta.data)
 #Save data.
-saveRDS(cormat, file = "06_003_pbmc130k_cormat.rds")
+saveRDS(pbmc, file = "06_004_pbmc.rds")
+setwd("~/Desktop")
+pbmc <- readRDS("06_004_pbmc.rds")
 
-# Load data.
-cormat <- readRDS("06_003_pbmc130k_cormat.rds")
+table(pbmc[[]]$seurat_clusters)
+#https://cloud.tencent.com/developer/article/1606504
+#Seurat新版教程:Guided Clustering Tutorial-（下
+print(pbmc[['pca']],dims=1:9,nfeatures = 9)
+DimPlot(pbmc,reduction = 'pca')
+
+cxcr2_expression = GetAssayData(object = pbmc, 
+                               assay = "RNA", slot = "data")["CCL5",]
+subcluster_markers = list(c1=c('NKG7','CCL5','GZMA','IL32','LTB',
+                               'IL7R','MKI67','KIAA0101','HMGB2'), #T cells
+                      c2=c('TCL1A','IGHD','CXCR4','IGHG1','IGHA1',
+                           'CLECL1','MZB1','XBP1','JCHAIN'), #B cells
+                      c3=c('FGFBP2','CCL4','FCGR3A','SELL','GZMK','XCL1'), #NK cells
+                      c4=c('RETN','ALOX5AP','IL1R2','MS4A6A',
+                           'HLA-DRA','HLA-DRB1','FCGR3A','MS4A7','FTH1',
+                       'C1orf56','CTNNB1','CD14'), #Monocytes
+                      c5=c('HLA-DRB1','CLEC10A','CD1C','GZMB',
+                           'JCHAIN','IRF8','AXL','PPP1R14A','PLAC8') #Dendritic cells
+)
+pbmc_markers <- FindAllMarkers(pbmc,only.pos = T,
+                               min.pct = .25,
+                               thresh.use=.25)
+library(tidyverse)
+pbmc_markers_top5 <- pbmc_markers %>% 
+  group_by(cluster) %>%
+  top_n(5, avg_log2FC)
+#https://learn.gencore.bio.nyu.edu/single-cell-rnaseq/seurat-part-4-cell-clustering/
+#https://satijalab.org/seurat/articles/pbmc3k_tutorial.html
+
+DoHeatmap(object = pbmc, 
+          genes.use = top10$gene, 
+          slim.col.label = TRUE, 
+          remove.key = TRUE)
+FeaturePlot(pbmc, features = subcluster_markers$c1,label = T)
+#c1 for t cells 
+FeaturePlot(object = pbmc, 
+            features.plot =subcluster_markers$c1,
+            reduction.use = "umap")
+FeaturePlot(pbmc, features = subcluster_markers$c2,label = T)
+#c2 for b cells
+FeaturePlot(pbmc, features = subcluster_markers$c3,label = T)
+#c3 for nk cells
+FeaturePlot(pbmc, features = subcluster_markers$c4,label = T)
+#c4 for monocyte cells
+FeaturePlot(pbmc, features = subcluster_markers$c5,label = T)
+#c5 for dc cells
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = subcluster_markers$c1, 
+        label = TRUE)
+dotplot(pbmc,
+        features=subcluster_markers$c1,
+        assay='RNA',
+        group.by='umap')
 
 
 
+# TabulaMurisData to annotate cell type via singleR
+#https://github.com/mousepixels/sanbomics/blob/main/single_r.Rmd
+library(celldex)
+#https://bioconductor.org/packages/release/data/experiment/vignettes/celldex/inst/doc/userguide.html
+ref_hpbmc <- HumanPrimaryCellAtlasData()
+save(ref_hpbmc,file = 'HumanPrimaryCellAtlas.rda')
+ref_himmune <- celldex::DatabaseImmuneCellExpressionData()
+save(ref_himmune,file = 'DatabaseImmuneCellExpression.rda')
+library(SingleR)
+cluster_hpbmc <- SingleR(test = as.SingleCellExperiment(pbmc), 
+        ref = ref_hpbmc, 
+        labels = ref_hpbmc$label.main)
 
+pbmc$SingleR_labels <- cluster_hpbmc$labels
+head(pbmc$SingleR_labels)
+table(pbmc$SingleR_labels)
 
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = 'SingleR_labels', 
+        label = TRUE)
+
+FeaturePlot(pbmc, features = c("CXCR2", "CXCL8"))
+
+#for human immune cluster from singleR
+cluster_himmune <- SingleR(test = as.SingleCellExperiment(pbmc), 
+                         ref = ref_himmune, 
+                         labels = ref_himmune$label.main)
+
+pbmc$SingleR_immune <- cluster_himmune$labels
+head(pbmc$SingleR_immune)
+table(pbmc$SingleR_immune)
+
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = 'SingleR_immune', 
+        label = TRUE)
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = 'SingleR_immune', 
+        label = F)
+
+FeaturePlot(pbmc, features = c("CXCR2"))
+table(pbmc@meta.data$orig.ident)
+table(pbmc@meta.data$seurat_clusters)
+#8 cluster 
+Idents(pbmc)
+GetAssayData(pbmc,slot = 'counts')
+allgenes <- row.names(GetAssayData(pbmc,slot = 'counts'))
+allgenes[grep('CXC',allgenes)]
+#no features for cxcl8 & cxcr2
+allgenes[grep('IL',allgenes)]
+
+#could also combine more than one dataset
+cluster_pbmcimmune <- SingleR(test = as.SingleCellExperiment(pbmc), 
+                           ref = list(pbmc=ref_hpbmc,immune=ref_himmune), 
+                           labels = list(ref_hpbmc$label.main,
+                                         ref_himmune$label.main))
+
+pbmc$SingleR_pbmcimmune <- cluster_pbmcimmune$labels
+head(pbmc$SingleR_pbmcimmune)
+table(pbmc$SingleR_pbmcimmune)
+View(pbmc$SingleR_pbmcimmune)
+
+pbmc$SingleR_pbmcimmune <- ifelse(pbmc$SingleR_pbmcimmune=='B cells',
+                                  'B_cell',
+                                  pbmc$SingleR_pbmcimmune)
+pbmc$SingleR_pbmcimmune <- ifelse(pbmc$SingleR_pbmcimmune=='NK cells',
+                                  'NK_cell',
+                                  pbmc$SingleR_pbmcimmune)
+pbmc$SingleR_pbmcimmune <- ifelse(pbmc$SingleR_pbmcimmune=='Monocytes',
+                                  'Monocyte',
+                                  pbmc$SingleR_pbmcimmune)
+table(pbmc$SingleR_pbmcimmune)
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = 'SingleR_pbmcimmune', 
+        label = TRUE)+
+  NoLegend()
+DimPlot(pbmc, 
+        reduction = 'umap', 
+        group.by = 'SingleR_pbmcimmune', 
+        label = F)
+
+FeaturePlot(pbmc, features = c("CXCR2", "CXCL8"))
