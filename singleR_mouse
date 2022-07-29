@@ -1,0 +1,89 @@
+---
+title: "singleR_mouse"
+author: "nanaliu"
+date: '2022-06-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 
+```{r cars}
+library(SingleR)
+library(celldex)
+library(Seurat)
+setwd("B:/ORG/Forschung/AN3/Liu_Na_LN/20220503_scRNA_seq_for_patient/20220505_liver_atlas_integration")
+
+ref_h <- celldex::HumanPrimaryCellAtlasData()
+save(ref_h,file = '220628ref_h.rda')
+cluster_m <- SingleR(test=as.SingleCellExperiment(aizarani_healthy),                     ref = ref_m,
+                     labels = ref_m$label.main)
+```
+
+totally wrong because the original data is for human liver, but not for mouse liver!
+![](https://raw.githubusercontent.com/liunanaliu/images/main/aizarani.png)
+
+![](https://raw.githubusercontent.com/liunanaliu/images/main/aizarani_heatmap.png)
+```{r cars}
+library(SingleR)
+library(celldex)
+library(Seurat)
+setwd("B:/ORG/Forschung/AN3/Liu_Na_LN/20220503_scRNA_seq_for_patient/20220505_liver_atlas_integration")
+
+ref_m <- celldex::MouseRNAseqData()
+save(ref_m,file = '220628ref_m.rda')
+cluster_m <- SingleR(test = as.SingleCellExperiment(aizarani_healthy),ref = ref_m,
+                     labels = ref_m$label.main)
+```
+```{r cars}
+head(cluster_m$labels)
+aizarani_healthy$singler_label <- cluster_m$labels
+```
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+DimPlot(aizarani_healthy,reduction = 'umap',
+        group.by = 'singler_label',
+        label = T)
+```
+not ideal
+```{r cars}
+library("scuttle")
+library("TabulaMurisData")
+#library('dbplyr') install.packages("dbplyr")
+#library('BiocFileCache')
+library(dplyr)
+library(ExperimentHub)
+
+eh <- ExperimentHub::ExperimentHub()
+query(eh,'TabulaMurisData')
+```
+[Tabula et al, 2018, if50](https://pubmed.ncbi.nlm.nih.gov/30283141/) developed sc transcriptomics of 20 mouse organs with a tabula muris, which originated the development of [tabulaMurisData](https://bioconductor.org/packages/release/data/experiment/html/TabulaMurisData.html), included in the [experimenthub](https://bioconductor.org/packages/release/bioc/html/ExperimentHub.html)
+```{r cars}
+liver_ref <- eh[['EH1617']]
+liver_ref <- liver_ref[,liver_ref$tissue=='Liver']
+liver_ref <- liver_ref[,!is.na(liver_ref$cell_ontology_class)]
+liver_ref
+```
+
+```{r cars}
+save(liver_ref,file = '220628liver_ref.rda')
+library(scuttle)
+library(SingleR)
+liver_ref <- logNormCounts(liver_ref)
+cluster_ml <- SingleR(test = as.SingleCellExperiment(aizarani_healthy),ref = liver_ref,
+                     labels = liver_ref$cell_ontology_class)
+aizarani_healthy$singlr_label <- cluster_ml$labels
+
+```
+
+
+```{r cars}
+DimPlot(aizarani_healthy,reduction = 'umap',
+        group.by = 'singlr_label',
+        label = T)
+```
