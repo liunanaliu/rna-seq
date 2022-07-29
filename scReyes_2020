@@ -1,0 +1,180 @@
+#220713 pbmc from reyes et al, 2020,
+#since reyes is wrote via python, i found another author with r code
+#https://github.com/keita-iida/ASURATBI/blob/f223d9a0ba901a7ca15769e7647738c285780864/vignettes/04-pbmc130k.Rmd
+#analyze the pbmc data
+#https://keita-iida.github.io/ASURATBI/04-pbmc130k.html
+library(ASURAT)
+library(SingleCellExperiment)
+library(SummarizedExperiment)
+
+setwd("B:/ORG/Forschung/AN3/Liu_Na_LN/220708scRNA_sepsis/SCP548")
+
+{
+fn <- "expression/scp_gex_matrix.csv"
+pbmc <- read.csv(fn, check.names = FALSE)
+
+genes <- pbmc[-1, 2]
+cells <- colnames(pbmc)[-seq_len(2)]
+pbmc <- pbmc[-1, -seq_len(2)]
+rownames(pbmc) <- make.unique(genes)
+colnames(pbmc) <- make.unique(cells)
+# Load sample information
+info <- read.delim("metadata/scp_meta.txt")
+info <- info[-1, ]
+rownames(info) <- info$NAME
+info <- info[, -1]
+info <- info[cells, ]
+
+# Create a SingleCellExperiment object.
+pbmc <- SingleCellExperiment(assays = list(counts = as.matrix(pbmc)),
+                             rowData = data.frame(gene = rownames(pbmc)),
+                             colData = as.data.frame(info))
+
+dim(pbmc)
+saveRDS(pbmc, file = "backup/06_001_pbmc130k_data.rds")
+}
+
+pbmc <- readRDS("B:/ORG/Forschung/AN3/Liu_Na_LN/220708scRNA_sepsis/SCP548/20220219_pbmc130k_Reyes2020.rds")
+# Preprocessing
+## !!!Control data quality
+#Remove variables (genes) and samples (cells) with low quality,
+#by processing the following three steps:
+  
+#1. remove variables based on expression profiles across samples,
+#2. remove samples based on the numbers of reads and nonzero expressed variables,
+#3. remove variables based on the mean read counts across samples.
+
+#First of all, add metadata for both variables and samples using ASURAT function
+#`add_metadata()`.
+
+pbmc <- add_metadata(sce = pbmc, 
+                     mitochondria_symbol = "^MT-")
+
+### Remove variables based on expression profiles
+pbmc <- remove_variables(sce = pbmc, 
+                         min_nsamples = 100)
+
+### Remove samples based on expression profiles
+title <- "PBMC (Reyes et al., 2020)"
+df <- data.frame(x = colData(pbmc)$nReads, 
+                 y = colData(pbmc)$nGenes)
+p <- ggplot2::ggplot() +
+  ggplot2::geom_point(ggplot2::aes(x = df$x, 
+                                   y = df$y), 
+                      size = 1, alpha = 1) +
+  ggplot2::labs(title = title, 
+                x = "Number of reads", 
+                y = "Number of genes") +
+  ggplot2::theme_classic(base_size = 20) +
+  ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, 
+                                                    size = 20))
+filename <- "figures/figure_06_0010.png"
+ggplot2::ggsave(file = filename, 
+                plot = p, 
+                dpi = 50, 
+                width = 5, 
+                height = 5)
+
+pbmc <- remove_samples(sce = pbmc, 
+                       min_nReads = 1500, max_nReads = 30000,
+                       min_nGenes = 100, max_nGenes = 1e+10,
+                       min_percMT = 0, max_percMT = 10)
+#could not figure out the reason for this setting
+#!!!
+
+pbmc <- remove_variables_second(sce = pbmc, 
+                                min_meannReads = 0.05)
+#ASURAT function remove_variables_second() removes variable (gene) data such that 
+#the mean read counts across samples are less than min_meannReads.
+
+dim(pbmc)
+#5723 59935
+# Save data.
+saveRDS(pbmc, file = "06_002_pbmc130k_dataqc.rds")
+
+# Load data.
+pbmc <- readRDS("06_002_pbmc130k_dataqc.rds")
+
+#!!!normalization data
+#Perform bayNorm() (Tang et al., Bioinformatics, 2020) 
+#for attenuating technical biases with respect to zero 
+#inflation and variation of capture efficiencies between 
+#samples (cells).
+library(bayNorm)
+BETA <- bayNorm::BetaFun(Data = assay(pbmc, "counts"), 
+                         MeanBETA = 0.06)
+bay_out <- bayNorm::bayNorm(assay(pbmc, "counts"),
+                            Conditions = colData(pbmc)$Patient,
+                            BETA_vec = BETA[["BETA"]], 
+                            Prior_type = "GG",
+                            mode_version = TRUE)
+#really hard to run o my computer!!! a big challenge
+save(bay_out,file = 'bay_out.rda')
+mat_list <- bay_out[["Bay_out_list"]]
+#error! error! error!
+#https://github.com/WT215/bayNorm
+mat_list <- bay_out$Bay_out
+mat <- do.call("cbind", mat_list)
+#https://github.com/WT215/bayNorm/issues/1
+#let us try the next code 
+mat <- cbind(bay_out$Bay_out)
+pbmc <- pbmc[, colnames(mat)]
+assay(pbmc, "normalized") <- mat
+
+#Perform log-normalization with a pseudo count.
+assay(pbmc, "logcounts") <- log(assay(pbmc, "normalized") + 1)
+#Center row data.
+mat <- assay(pbmc, "logcounts")
+assay(pbmc, "centered") <- sweep(mat, 1, 
+                                 apply(mat, 1, mean), 
+                                 FUN = "-")
+
+#Set gene expression data into altExp(sce).
+sname <- "logcounts"
+altExp(pbmc, sname) <- SummarizedExperiment(list(counts = assay(pbmc, sname)))
+
+#Add ENTREZ Gene IDs to rowData(sce).
+library(AnnotationDbi)
+dictionary <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db,
+                                    key = rownames(pbmc),
+                                    columns = "ENTREZID", 
+                                    keytype = "SYMBOL")
+dictionary <- dictionary[!duplicated(dictionary$SYMBOL), ]
+rowData(pbmc)$geneID <- dictionary$ENTREZID
+
+# Save data.
+saveRDS(pbmc, file = "06_003_pbmc130k_normalized.rds")
+#!!!the whole process for normalization is time consuming and 
+#could not handle in my computer with small ram
+
+# Load data.
+pbmc <- readRDS("06_003_pbmc130k_normalized.rds")
+#6.14 https://keita-iida.github.io/ASURATBI/04-pbmc130k.html#reduce-dimensions-of-sign-by-sample-matrices
+info <- as.data.frame(colData(pbmc))
+library(Seurat)
+##mat <- as.matrix(assay(pbmc, "counts")) #optimal
+pbmc <- Seurat::CreateSeuratObject(counts = as.matrix(assay(pbmc, "counts")),
+                                   project = "PBMC", 
+                                   meta.data = info[,seq_len(4)])
+#seq_len(5) changed 4, 
+#Error: vector memory exhausted (limit reached?)
+#multifaceted sign analysis
+#Infer cell or disease types, biological functions, and signaling pathway 
+#activity at the single-cell level by inputting related databases.
+
+#ASURAT transforms centered read count tables to functional feature matrices, 
+#termed sign-by-sample matrices (SSMs). Using SSMs, perform unsupervised clustering of samples (cells).
+
+mat <- t(as.matrix(assay(pbmc, "centered")))
+cormat <- cor(mat, method = "spearman")
+
+#Save data.
+saveRDS(cormat, file = "06_003_pbmc130k_cormat.rds")
+
+# Load data.
+cormat <- readRDS("06_003_pbmc130k_cormat.rds")
+
+
+
+
+
